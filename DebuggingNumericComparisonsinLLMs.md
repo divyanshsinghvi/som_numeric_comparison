@@ -1,18 +1,20 @@
 ---
-title: "Debugging Numeric Comparisons in LLMs"
+# title: "Debugging Numeric Comparisons in LLMs"
 subtitle: "Why models like Gemma-2-2B-IT fail at `9.8 < 9.11`"
 date: 2025-09-12
 description: "Layerwise geometry shows the model internally separates Yes/No, but a last-layer readout corrupts the decision—especially for decimals."
 tags: [LLM, Mechanistic Interpretability, Numeric Reasoning, Debugging]
-cover: images/cover_pca.png
+cover: /assets/debug-num-llms/cover_pca.png
 math: true
+layout: post
+author: divyansh singhvi and LLMs
 ---
 
-# Debugging Numeric Comparisons in LLMs
+<!-- # Debugging Numeric Comparisons in LLMs -->
 Study on Gemma-2-2B-IT
 
 > **TL;DR:**  
-> LLMs *internally* represents the  correct way to compare numbers (80–90% accuracy in penultimate layers) but the **final layer corrupts this knowledge**, causing simple failures like `9.8 > 9.11`.
+> LLMs *internally* represents the  correct way to compare numbers (80–90% accuracy in penultimate layers) but the **final layer corrupts this knowledge**, causing simple failures like `9.8 < 9.11`.
 
 ---
 
@@ -41,7 +43,7 @@ LLMs can ace complex reasoning yet still fail at simple numeric comparisons like
 **Finding**: Numeric datasets are cleanly separable; strings aren’t. Decimals show sub-structure that becomes clearer at L-1, where accuracy is higher.
 **Why it supports the takeaway**: Separation in hidden states despite wrong outputs implies a output projection failure, not a representation failure.
 
-![graph labeled based on true values: ](data/pca_scatter_plot_truth.png)
+![graph labeled based on true values: ]({{ "/assets/debug-num-llms/pca_scatter_plot_truth.png" | relative_url }})
 
 ### 2) Cross-dataset axis alignment reveals a shared comparator (except length)
 
@@ -49,7 +51,9 @@ LLMs can ace complex reasoning yet still fail at simple numeric comparisons like
 **Finding**: Most numeric sets align **strongly** (>0.85), but integers_diff_len is **least aligned** (~0.6), consistent with a **length-based heuristic** distinct from value comparison.
 **Why**: A shared axis suggests a common **value comparator** subspace; misalignment flags a different (shortcut) mechanism.
 
-[g](data/layerwise_alignment.html)
+{% include_relative data/layerwise_alignment.html %}
+
+<!-- [g]({{ "/assets/debug-num-llms/layerwise_alignment.html" | relative_url }}) -->
 
 ### 3) Readout vs representation: forced-choice along the unembedding direction
 
@@ -57,15 +61,15 @@ LLMs can ace complex reasoning yet still fail at simple numeric comparisons like
 **Finding**: Accuracy is near random until **~L23**, then peaks, then **collapses at L25**, with the strongest failure on decimal "No" cases (systematic **Yes-bias**).
 **Why**: The **late readout** step (not the earlier representation) drives the error, pinpointing where to intervene.
 
-If you only have the HTML for this figure, keep the above line as a text link instead:
-[Layerwise readout patterns (HTML)](data/readout_breakdown_final_layers.html)
+{% include_relative data/forced_choice_accuracy.html %}
 
 ### 4) Causal edits: last-layer MLP corrupts the decision
 
-**What**: Activation patching from **L24→L25** at multiple hooks using TransformerLens.
+**What**: Activation patching from **L24→L25** at multiple hooks using TransformerLens [Nanda & Bloom, 2022](#references).
 **Finding**: Patching `mlp_post`/`resid_post` **improves** accuracy; other patches often hurt.
 **Why**: This isolates the **final-block MLP** as the primary corruption source.
-[text](data/acc_before_after_across_hooks.html)
+
+{% include_relative data/acc_before_after_across_hooks.html %}
 
 
 ### 5) Targeted neuron ablations repair failures
@@ -73,12 +77,12 @@ If you only have the HTML for this figure, keep the above line as a text link in
 **What**: Rank final-block neurons by **gradient-weighted contribution** to the Yes–No margin; ablate the **top-50** harmful globally and per-dataset.
 **Finding**: Large gains for `integers_equal_len` and `decimals_diff_len`; residual asymmetries show the model still attends to decimal length when truth is "No".
 **Why**: Confirms that a **small, surgical set** of neurons drive the bias—and that fixing them restores behavior.
-[text](data/accuracy_grouped_bar_resid_post.html)
+{% include_relative data/accuracy_grouped_bar_resid_post.html %}
 
 
 ## Bottom line
 
-Gemma-2-2B-IT internally represents the correct comparator but the last-layer MLP (readout) introduces a Yes-biased corruption. Simple, principled interventions—patching or ablating ~50 neurons—substantially reduce errors, and diagnostics suggest a lingering length heuristic distinct from true value comparison.
+Gemma-2-2B-IT internally represent the correct comparator but the last-layer MLP (readout) introduces a Yes-biased corruption. Simple, principled interventions—patching or ablating ~50 neurons—substantially reduce errors, and diagnostics suggest a lingering length heuristic distinct from true value comparison.
 
 
 
@@ -110,7 +114,7 @@ To systematically probe the model's comparison abilities, a custom dataset was c
 
 The goal was to: 
 - Separate **numeric** from **lexicographic** comparisons.
-- Disentangle **length cues** while doing **value comparion**.
+- Disentangle **length cues** while doing **value comparison**.
 - Provide a control (strings) for lexicographic comparisons.
 
 Created a custom dataset with 500 samples for each in the format `Question: Is {a} > {b}? Answer:`
@@ -174,29 +178,31 @@ To understand the geometry of internal model's representation we conducted a PCA
 <!-- PCA was conducted on the final layer activations. When labeled by their true values, the numeric datasets show clean, linearly separable clusters. This suggests the model internally "knows" the correct answer. String comparisons, however, remain an inseparable cloud. -->
 
 
-![graph labeled based on true values: ](data/pca_scatter_plot_truth.png)
+![graph labeled based on true values: ]({{ "/assets/debug-num-llms/pca_scatter_plot_truth.png" | relative_url }})
 - The class `integers_equal_len` and `decimals_equal_len` are separable along PC1 cleanly while the others don't on their PC1. 
 - `Decimals_diff_len` shows a 4 sub cluster instead of 2 and when plotted for last_layer - 1 [layer 24], `decimals_equal_len` also started showed that subcluster 
-![alt text](data/pca_scatter_plot_truth_lm2.png)
+![alt text]({{ "/assets/debug-num-llms/pca_scatter_plot_truth_lm2.png" | relative_url }})
 - Doing PCA on last_layer - 1 where the accuracy was high (shown ahead) had similar separation but larger magnitude in separation. 
-![alt text](data/pca_scatter_plot_string_truth.png)
+![alt text]({{ "/assets/debug-num-llms/pca_scatter_plot_string_truth.png" | relative_url }})
 - There is no clear separation in string comparison, which explains the lack of correlation between how numeric comparison were treated as compared to string. Based on these results I thought of digging deeper into numeric only.
 
-![For graph labeled based on predicted values:](data/pca_scatter_plot_predicted.png)
+![For graph labeled based on predicted values:]({{ "/assets/debug-num-llms/pca_scatter_plot_predicted.png" | relative_url }})
 - Clearly integers has much better predictions and decimals are all Yes predictions, even when the separation is clearly evident. 
 
 ### 3.2 Cross-Projection PCA
 
 **Goal**: See if the model uses a shared mechanism for different numeric types comparison
 
-![alt text](data/cross_projection_pca.png)
+![alt text]({{ "/assets/debug-num-llms/cross_projection_pca.png" | relative_url }})
 
 **Methodology**
 
 PCA was fit on each dataset's activations. Activations from other datasets were then projected into this learned PCA space.
 This helps us to ask: `does a separating axis from one dataset also reveal structure in another? Answer is YES`.  
 
-Calculated cosine similarity between **Yes-No mean difference** axes in source vs target representations. 
+Calculated cosine similarity between **Yes-No mean difference** [Appendix B](#appendix-b) axes in source vs target representations. 
+
+
 
 ### Cross-dataset alignment (cosine similarity)
 
@@ -208,7 +214,7 @@ Cosine similarity of their Yes–No axes
   - ~0  ⇒ orthogonal (unrelated)
   - <0 ⇒ opposite directions
 
-![alt text](data/cosine_similary_between_mean_diff_axes.jpg)
+![alt text]({{ "/assets/debug-num-llms/cosine_similary_between_mean_diff_axes.jpg" | relative_url }})
 
 **Result**:
 - **integers_diff_len** is **least aligned** with others (~0.6 cosine) → likely a **length-based heuristic**.
@@ -222,8 +228,8 @@ Cosine similarity of their Yes–No axes
 **Methodology** 
 At each layer ℓ, compute unit vector **w** pointing from class "No" mean to "Yes" mean; measure separation Δ = |E[⟨h, w⟩ | Yes] − E[⟨h, w⟩ | No]|.
 
+{% include_relative data/layerwise_separation.html %}
 
-[ok](data/layerwise_separation.html)
 
 **Findings**:
 - **integers_diff_len** were able to start getting separated faster than any other -> *likely because it's easy to do just based on length instead of actually comparing*
@@ -249,7 +255,7 @@ This is a number between –1 and 1:
 ≈ 0 → their separation axes are orthogonal (completely unrelated).
 ≈ –1 → they’re using opposite directions (what counts as “Yes” for one looks like “No” for the other).
 
-[g](data/layerwise_alignment.html)
+{% include_relative data/layerwise_alignment.html %}
 
 **Findings**
 Clearing in  we can see, integers_diff_len has a much lower correlation with other datasets, so model is definitely treating the length comparison separately and rest others in a similar manner with a high correlation of the mean diff vectors.
@@ -262,8 +268,8 @@ Clearing in  we can see, integers_diff_len has a much lower correlation with oth
 
 <!-- {%include_relative data/probe_accuracy_pooled_vs_slice.html%}  -->
 
-[text](data/probe_accuracy_pooled_vs_slice.html)
-[text](data/probe_delta_heatmap.html)
+{% include_relative data/probe_accuracy_pooled_vs_slice.html %}
+{% include_relative data/probe_delta_heatmap.html %}
 **Findings**:
 - Model started learning to differentiate between `integers_diff_len` from `layer 0`
 - Strong linear separability emerges mid-to-late layers; **Layer 11+** cleanly separates all numeric classes.  
@@ -277,20 +283,20 @@ Clearing in  we can see, integers_diff_len has a much lower correlation with oth
 
 a. Logit gap: the positive value for the gap indicates bias towards Yes and negative towards No. The magnitude tells how strongly it reflects. 
 b. Forced choice accuracy: "If model were forced to decide Yes vs No using only the activations projected at this layer, how accurate would it be? "
-[alt text](data/forced_choice_accuracy.html)
+{% include_relative data/forced_choice_accuracy.html %}
 
 
 **Findings**:
-[alt text](data/readout_gapvslayer_using_tokensyesno.html)
+{% include_relative data/readout_gapvslayer_using_tokensyesno.html %}
 
 - forced-choice accuracy continues to stay random till layer 22, implying the projections on r is random. I expected it to be random for all the cases surprisingly it became very high for Layer 23 and again started decreasing. 
 
 
 **Key pattern**:
-1. **Layer 0-2** : Decreasing bias shiftes from **No -> neutral**. 
+1. **Layer 0-2** : Decreasing bias shifts from **No -> neutral**. 
 2. **Layer 3-14**: slight **Yes** bias persist.
 3. **Layer 15-19**: Steep **Yes bias increase**.
-4. **Layer 20-23**: Biase shifts from **Yes -> neutral**.  **forced-choice accuracy peaks at Layer 23**
+4. **Layer 20-23**: Bias shifts from **Yes -> neutral**.  **forced-choice accuracy peaks at Layer 23**
 5. **Layer 24-25**: Increases slightly towards yes again. **accuracy drops close to random for decimals for Layer 25** 
 
 
@@ -299,7 +305,7 @@ b. Forced choice accuracy: "If model were forced to decide Yes vs No using only 
 - This gives us an understanding that unbiased layers have higher accuracy if they also have emergence of class separation. That's why it peaks at Layer 23 and drops back as bias started to increase again. We see emergence in previous sections and biasness in this section.
 
 
-[alt text](data/readout_breakdown_final_layers.html)
+{% include_relative data/readout_breakdown_final_layers.html %}
 The plot shows clear indication of bias towards Yes and performance degrading from Layer 23 to Layer 25 in all 4 numeric datasets. 
 
 ---
@@ -314,7 +320,7 @@ The plot shows clear indication of bias towards Yes and performance degrading fr
 Patch **L25** activations with **L24** for hooks `resid_post`, `mlp_post`, `resid_pre`, `resid_mid`, `attn_out`. It will help to isolate the source of the error.
 
 
-[text](data/acc_before_after_across_hooks.html)
+{% include_relative data/acc_before_after_across_hooks.html %}
 
 **Findings**:
 - **Patching `resid_post` / `mlp_post` from L24 → L25 *improves* accuracy**.  
@@ -323,7 +329,7 @@ Patch **L25** activations with **L24** for hooks `resid_post`, `mlp_post`, `resi
 - **Result**
 Patching the output of the MLP sub-block (resid_post, mlp_post) reliably improves accuracy. This causally implicates the final MLP layer as the primary source of corruption.
 
-![text](data/hook_patched_accuracy.jpg)
+![text]({{ "/assets/debug-num-llms/hook_patched_accuracy.jpg" | relative_url }})
 
 
 ### 5.2 Harmful-neuron discovery & ablation
@@ -332,14 +338,14 @@ Patching the output of the MLP sub-block (resid_post, mlp_post) reliably improve
 
 **Methodology**:
 
-1. Discovery: First, I identified the most "harmful" neurons by scoring their negative impact on accuracy across the entire dataset. Neurons were ranked based on a gradient-based method that measures how much their activation contributes to pushing the final decision in the wrong direction (see Appendix C for the mathematical details).
+1. Discovery: First, I identified the most "harmful" neurons by scoring their negative impact on accuracy across the entire dataset. Neurons were ranked based on a gradient-based method that measures how much their activation contributes to pushing the final decision in the wrong direction (see [Appendix C](#appendix-c) for the mathematical details).
 
 2. Verification: To ensure these findings weren't just an artifact of overfitting to the test data, I repeated the experiment with a formal train/validation split. The harmful neurons were identified using only the training data, and then ablated to measure the performance change on the held-out validation data.
 
 
 
 Score neurons by their negative impact on accuracy (per dataset and globally). . Note that here we are using the full data as training and prediction with no splits. Next section deals with train and validation splits, the results remain similar.
-Appendix C. describes the mathematical intuition.
+[Appendix C](#appendix-c). describes the mathematical intuition.
 
  h_j element_wise_multiplication (W_out[j] · g) where g is gradient of dot product of projection of layer norm and Yes/No direction with respect to r_post, and W_out is the weight element of j_{th} neuron and h_j is the activation value of the neuron.  
  We then align this with truth_yn predictions (+1 if Yes else -1)
@@ -347,8 +353,8 @@ Appendix C. describes the mathematical intuition.
 Which lets us ask the question that whether the neuron is helpful for the class. Positive = helpful, negative = harmful
 
 
-[text](data/accuracy_grouped_bar_resid_post.html)
-[text](data/accuracy_delta_bar_resid_post.html)
+{% include_relative data/accuracy_grouped_bar_resid_post.html %}
+{% include_relative data/accuracy_delta_bar_resid_post.html %}
 
 
 **Findings**
@@ -358,14 +364,17 @@ Ablating just the top 50 globally harmful neurons (out of **Total neurons = 9216
 - surprisingly **decimals_equal_len** which can be compared as **integers_equal_len** for methodology of comparing as decimal has no effect when comparing. 
 - Even after ablation in **decimals_diff_len**, when truth is **No** and decimal part of the first number is **greater in length**, vs when decimal part of the first number is **smaller in length** it's easier for model to predict when length is smaller vs length is greater which gives an indication that the model does take length of the values into account also.
 
-![alt text](data/ct_diff_pair_type_truth_len_ablation.jpg)
+
+![alt text]({{ "/assets/debug-num-llms/ct_diff_pair_type_truth_len_ablation.jpg" | relative_url }})
 
 
 **Verification Findings**  
-Results are not very different from the previous apprach with similar trends. 
-[pairtype_grouped_acc](data/pairtype_grouped_acc.html)
-[pairtype_delta_bars](data/pairtype_delta_bars.html)
-[pairtype_delta_margin_heatmap](data/pairtype_delta_margin_heatmap.html)
+Results are not very different from the previous approach with similar trends. 
+
+{% include_relative data/pairtype_grouped_acc.html %}
+{% include_relative data/pairtype_delta_bars.html %}
+{% include_relative data/pairtype_delta_margin_heatmap.html %}
+
 
 
 
@@ -401,12 +410,12 @@ Neurons more harmful in integers_diff_len: [406, 7592, 2045, 7026, 7986, 8945, 8
 
 Interestingly, if we take a intersection of top50 global neurons vs top30 each dataset neurons. 
 
-Least interesection is with decimals_diff_len = 17
+Least intersection is with decimals_diff_len = 17
 Then Integer_diff_len = 22
 then tied integer_equal_len and decimal_equal_len = 27
 
 
-### B. What is the Yes–No mean difference?
+### B. What is the Yes–No mean difference? {#appendix-b}
 
 Let each example i have:
 - activation vector: h_i (dimension d)
@@ -432,7 +441,7 @@ Signed score of any activation h along this axis
 Separation magnitude along the axis
 - separation = | E[score(h) | y=Yes] − E[score(h) | y=No] |
 
-### C. Harmful Neuron Finding
+### C. Harmful Neuron Finding {#appendix-c}
 
 #### How do I rank the neurons from most harmful to least harmful?
 - We focus on the last transformer block post which it goes to ln_head.
@@ -440,7 +449,7 @@ Separation magnitude along the axis
 - MLP hidden activations: `h = mlp_post[L-1]` (shape: d_mlp).
 - MLP output weight: `W_out` (shape: d_mlp × d_model).
 - Readout direction (Yes–No): `Δw = W_U[Yes] - W_U[No]`.
----
+
 ##### Logit Gap (Margin)
 
 The Yes–No margin is:
@@ -474,11 +483,15 @@ Basically trying out to see, h_j how strongly neuron j is firing and gradient pr
 Next step would be to multiply it by (1 if Yes else -1) to align by truth.
 
 
-## References
+## References {#references}
+
+- Nanda, N., & Bloom, J. (2022). *TransformerLens*. GitHub repository. https://github.com/TransformerLensOrg/TransformerLens
+- Alain, G., & Bengio, Y. (2016). Understanding intermediate layers using linear classifier probes. arXiv:1610.01644. https://arxiv.org/abs/1610.01644
+
 
 
 ## Disclaimer
-I have only did this research in ~15 hours so there are lot of things unexplored and the quality of work can be significantly improved. Took a lot more time in writing than I expected (probably around 7 hours to refine ) .  
+I only did this research in ~15 hours so there are lot of things unexplored and the quality of work can be significantly improved. Took a lot more time in writing than I expected (probably around 7 hours to refine ) .  
 
 
 
